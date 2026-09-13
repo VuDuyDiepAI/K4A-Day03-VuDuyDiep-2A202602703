@@ -28,14 +28,8 @@ TOOLS_SCHEMA = [
     },
     
     # --------------------------------------------------------------------------
-    # TODO 1.2: HỌC VIÊN HOÀN THIỆN TOOL SCHEMA CHO 'schedule_appointment'
-    # 🎯 YÊU CẦU THIẾT KẾ SCHEMA (JSON SCHEMA STANDARD):
-    # 1. Tool dùng để đặt lịch hẹn tư vấn học vụ với Cố vấn học tập VinUni.
-    # 2. Thiết kế các tham số (properties) để LLM trích xuất:
-    #    - student_id (string): Mã sinh viên cần đặt lịch (ví dụ: 'SV2026001')
-    #    - datetime_str (string): Thời gian hẹn (ví dụ: '14:00 15/09/2026')
-    #    - advisor_name (string): Tên cố vấn học tập
-    # 3. Khai báo danh sách các trường bắt buộc (required).
+    # TASK 1.2 (ĐÃ HOÀN THIỆN): TOOL SCHEMA CHO 'schedule_appointment'
+    # Tool dùng để đặt lịch hẹn tư vấn học vụ với Cố vấn học tập VinUni.
     # --------------------------------------------------------------------------
     {
         "name": "schedule_appointment",
@@ -43,9 +37,46 @@ TOOLS_SCHEMA = [
         "parameters": {
             "type": "object",
             "properties": {
-                # TODO 1.2: Khai báo các thuộc tính tham số cho Tool tại đây...
+                "student_id": {
+                    "type": "string",
+                    "description": "Mã sinh viên cần đặt lịch hẹn (ví dụ: 'SV2026001')"
+                },
+                "datetime_str": {
+                    "type": "string",
+                    "description": "Thời gian hẹn mong muốn, định dạng 'HH:MM DD/MM/YYYY' (ví dụ: '14:00 15/09/2026')"
+                },
+                "advisor_name": {
+                    "type": "string",
+                    "description": "Tên Cố vấn học tập (Academic Advisor) mà sinh viên muốn đặt lịch tư vấn (ví dụ: 'PGS.TS Nguyễn Văn A')"
+                }
             },
-            "required": [] # TODO 1.2: Khai báo danh sách các trường bắt buộc tại đây...
+            "required": ["student_id", "datetime_str", "advisor_name"]
+        }
+    },
+
+    # --------------------------------------------------------------------------
+    # 🆕 TOOL BỔ SUNG (KHÁC BIỆT SO VỚI BÀI MẪU): 'exam_schedule_query'
+    # Đề tài đã chọn "Trợ lý Học vụ & Tra cứu Lịch thi VinUni" yêu cầu tra cứu
+    # LỊCH THI bên cạnh GPA và đặt lịch tư vấn, nên bổ sung thêm Tool thứ 3
+    # để Agent có đủ năng lực đáp ứng trọn vẹn đề bài (thay vì chỉ dừng ở 2 Tool
+    # như bộ khung mẫu ban đầu).
+    # --------------------------------------------------------------------------
+    {
+        "name": "exam_schedule_query",
+        "description": "Tra cứu lịch thi (ngày giờ, phòng thi, hình thức thi) của sinh viên VinUni theo mã sinh viên và tùy chọn theo mã học phần.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "student_id": {
+                    "type": "string",
+                    "description": "Mã sinh viên cần tra cứu lịch thi (ví dụ: 'SV2026001')"
+                },
+                "course_code": {
+                    "type": "string",
+                    "description": "Mã học phần cần tra cứu lịch thi cụ thể (ví dụ: 'CS101'). Nếu không cung cấp, trả về toàn bộ lịch thi của sinh viên."
+                }
+            },
+            "required": ["student_id"]
         }
     }
 ]
@@ -71,6 +102,17 @@ MOCK_DATABASE = {
         "status": "Đang học",
         "advisor": "TS. Lê Thị B"
     }
+}
+
+
+MOCK_EXAM_SCHEDULE = {
+    "SV2026001": [
+        {"course_code": "CS101", "course_name": "Nhập môn Lập trình", "exam_date": "20/09/2026", "exam_time": "08:00", "room": "P.301", "format": "Trắc nghiệm + Tự luận"},
+        {"course_code": "MA201", "course_name": "Đại số Tuyến tính", "exam_date": "22/09/2026", "exam_time": "13:30", "room": "P.205", "format": "Tự luận"}
+    ],
+    "SV2026002": [
+        {"course_code": "CS101", "course_name": "Nhập môn Lập trình", "exam_date": "20/09/2026", "exam_time": "08:00", "room": "P.302", "format": "Trắc nghiệm + Tự luận"}
+    ]
 }
 
 
@@ -102,10 +144,38 @@ def execute_schedule_appointment(student_id: str, datetime_str: str, advisor_nam
     }, ensure_ascii=False)
 
 
+def execute_exam_schedule_query(student_id: str, course_code: str = None) -> str:
+    """Thực thi tra cứu lịch thi theo mã sinh viên (và tùy chọn theo mã học phần)"""
+    sid = student_id.strip().upper()
+    schedule = MOCK_EXAM_SCHEDULE.get(sid)
+
+    if not schedule:
+        return json.dumps({
+            "status": "NOT_FOUND",
+            "message": f"Không tìm thấy lịch thi nào cho sinh viên có mã '{student_id}'"
+        }, ensure_ascii=False)
+
+    if course_code:
+        matched = [e for e in schedule if e["course_code"].strip().upper() == course_code.strip().upper()]
+        if not matched:
+            return json.dumps({
+                "status": "NOT_FOUND",
+                "message": f"Không tìm thấy lịch thi học phần '{course_code}' cho sinh viên '{student_id}'"
+            }, ensure_ascii=False)
+        schedule = matched
+
+    return json.dumps({
+        "status": "SUCCESS",
+        "student_id": student_id,
+        "exams": schedule
+    }, ensure_ascii=False)
+
+
 # Router gọi tool thực tế
 TOOL_ROUTER = {
     "academic_query": execute_academic_query,
-    "schedule_appointment": execute_schedule_appointment
+    "schedule_appointment": execute_schedule_appointment,
+    "exam_schedule_query": execute_exam_schedule_query
 }
 
 def dispatch_tool_call(tool_name: str, arguments: Dict[str, Any]) -> str:

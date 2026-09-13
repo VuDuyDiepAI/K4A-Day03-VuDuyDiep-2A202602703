@@ -6,6 +6,7 @@ Hỗ trợ Native Tool Calling và chuyển đổi linh hoạt qua biến môi t
 import os
 import sys
 import json
+import re
 from typing import Dict, Any, List
 from dotenv import load_dotenv
 
@@ -35,29 +36,103 @@ class MockOfflineProvider(BaseLLMProvider):
         return f"[Mock Chatbot Response]: Xin chào! Tôi đã nhận được câu hỏi '{prompt}'. (Chế độ Chatbot không có Tool tra cứu dữ liệu thời gian thực)."
 
     def generate_with_tools(self, prompt: str, tools_schema: List[Dict[str, Any]], system_prompt: str = "") -> Dict[str, Any]:
+        """
+        Mô phỏng nhận diện intent gọi Tool. Hỗ trợ vòng lặp ReAct ĐA BƯỚC (Multi-step):
+        `prompt` có thể chứa một [SCRATCHPAD] tích lũy các Action/Observation của các
+        bước trước (do 'src/app.py' nạp lại), nhờ đó Mock có thể quyết định gọi tiếp
+        Tool khác hay đã đủ dữ liệu để trả lời trực tiếp.
+        """
         prompt_lower = prompt.lower()
-        
-        # Mô phỏng nhận diện intent gọi Tool
-        if "sv2026001" in prompt_lower and "đặt lịch" in prompt_lower:
+
+        already_called_academic = "action=academic_query" in prompt_lower
+        already_called_schedule = "action=schedule_appointment" in prompt_lower
+        already_called_exam = "action=exam_schedule_query" in prompt_lower
+        has_prior_observation = "[scratchpad]" in prompt_lower
+
+        # Chỉ dò từ khóa Ý định (intent keywords) trong CÂU HỎI GỐC của người dùng,
+        # KHÔNG dò trong nội dung Scratchpad (Thought/Observation của các bước trước),
+        # để tránh nhận diện nhầm khi các câu Thought trước đó tình cờ chứa từ khóa
+        # như "tra cứu" bên trong phần diễn giải.
+        intent_lower = prompt_lower.split("[scratchpad]")[0]
+
+        # Trích mã sinh viên từ câu hỏi (ví dụ SV2026001, SV9999999...)
+        sid_match = re.search(r"sv\d{6,}", prompt_lower)
+        student_id = sid_match.group(0).upper() if sid_match else "SV2026001"
+
+        # Trích tên Cố vấn nếu đã được tra ra ở Observation của bước trước
+        advisor_match = re.search(r"[\"']?advisor[\"']?\s*:\s*[\"']([^\"']+)[\"']", prompt)
+        advisor_name = advisor_match.group(1) if advisor_match else "PGS.TS Nguyễn Văn A"
+
+        # Trích thời gian hẹn dạng 'HH:MM DD/MM/YYYY' nếu người dùng có nêu rõ
+        dt_match = re.search(r"\d{1,2}:\d{2}\s+(?:ngày\s+)?\d{1,2}/\d{1,2}/\d{4}", prompt)
+        datetime_str = dt_match.group(0).replace("ngày ", "") if dt_match else "14:00 15/09/2026"
+
+        # 1) Ý định tra cứu LỊCH THI
+        if ("lịch thi" in intent_lower or "lich thi" in intent_lower) and not already_called_exam:
+            course_match = re.search(r"\b([A-Z]{2,4}\d{2,4})\b", prompt)
+            args = {"student_id": student_id}
+            if course_match:
+                args["course_code"] = course_match.group(1)
             return {
                 "type": "tool_call",
-                "tool_name": "schedule_appointment",
-                "arguments": {"student_id": "SV2026001", "datetime_str": "14:00 15/09/2026", "advisor_name": "PGS.TS Nguyễn Văn A"},
-                "thought": "Người dùng yêu cầu đặt lịch hẹn tư vấn cho sinh viên SV2026001. Tôi sẽ gọi tool schedule_appointment."
+                "tool_name": "exam_schedule_query",
+                "arguments": args,
+                "thought": f"Người dùng cần tra cứu lịch thi. Tôi sẽ gọi tool exam_schedule_query cho mã {student_id}."
             }
-        elif "sv2026001" in prompt_lower or "tra cứu" in prompt_lower:
+
+        # 2) Ý định ĐẶT LỊCH nhưng cần xác định đúng Cố vấn phụ trách trước (Multi-step)
+        if "đặt lịch" in intent_lower and ("cố vấn của" in intent_lower or "cố vấn của mình" in intent_lower or "đúng cố vấn" in intent_lower) \
+                and not already_called_academic and not already_called_schedule:
             return {
                 "type": "tool_call",
                 "tool_name": "academic_query",
-                "arguments": {"student_id": "SV2026001"},
-                "thought": "Người dùng muốn tra cứu thông tin học vụ của sinh viên SV2026001. Tôi sẽ gọi tool academic_query."
+                "arguments": {"student_id": student_id},
+                "thought": f"Cần xác định đúng Cố vấn học tập phụ trách sinh viên {student_id} trước khi đặt lịch. Tôi sẽ gọi tool academic_query trước."
             }
-        else:
+
+        # 3) Ý định ĐẶT LỊCH trực tiếp (đã biết hoặc không cần tra cứu Cố vấn)
+        if "đặt lịch" in intent_lower and not already_called_schedule:
+            return {
+                "type": "tool_call",
+                "tool_name": "schedule_appointment",
+                "arguments": {"student_id": student_id, "datetime_str": datetime_str, "advisor_name": advisor_name},
+                "thought": f"Đã đủ thông tin để đặt lịch. Tôi sẽ gọi tool schedule_appointment cho {student_id} với Cố vấn {advisor_name}."
+            }
+
+        # 4) Ý định tra cứu học vụ / GPA (chỉ kích hoạt khi có từ khóa tra cứu rõ ràng,
+        # tránh gọi thừa Tool khi câu hỏi chỉ đơn thuần chứa mã sinh viên cho một Action khác)
+        if ("tra cứu" in intent_lower or "gpa" in intent_lower) and not already_called_academic:
+            return {
+                "type": "tool_call",
+                "tool_name": "academic_query",
+                "arguments": {"student_id": student_id},
+                "thought": f"Người dùng muốn tra cứu thông tin học vụ của sinh viên {student_id}. Tôi sẽ gọi tool academic_query."
+            }
+
+        # 5) Đã có Observation từ (các) bước trước -> tổng hợp câu trả lời cuối cùng
+        if has_prior_observation:
+            if "not_found" in prompt_lower:
+                content = (
+                    f"Rất tiếc, tôi không tìm thấy dữ liệu tương ứng với mã sinh viên '{student_id}' trong hệ thống. "
+                    f"Bạn vui lòng kiểm tra lại mã sinh viên và thử lại."
+                )
+            else:
+                content = (
+                    "Tôi đã tổng hợp xong dữ liệu từ (các) công cụ tra cứu ở trên để trả lời chính xác yêu cầu của bạn "
+                    "(xem chi tiết từng bước Observation trong Waterfall Trace Log)."
+                )
             return {
                 "type": "text",
-                "content": f"[Mock Agent Response]: Xin chào! Quy chế học vụ VinUni yêu cầu sinh viên tích lũy tối thiểu 120 tín chỉ và duy trì GPA trên 2.0 để tốt nghiệp.",
-                "thought": "Câu hỏi chung về quy chế học vụ, trả lời trực tiếp không cần gọi Tool."
+                "content": content,
+                "thought": "Đã nhận đủ Observation cần thiết từ MCP Server, tổng hợp câu trả lời cuối cùng cho sinh viên."
             }
+
+        # 6) Câu hỏi chung, không cần gọi Tool
+        return {
+            "type": "text",
+            "content": "[Mock Agent Response]: Xin chào! Quy chế học vụ VinUni yêu cầu sinh viên tích lũy tối thiểu 120 tín chỉ và duy trì GPA trên 2.0 để tốt nghiệp.",
+            "thought": "Câu hỏi chung về quy chế học vụ, trả lời trực tiếp không cần gọi Tool."
+        }
 
 
 class GeminiProvider(BaseLLMProvider):
