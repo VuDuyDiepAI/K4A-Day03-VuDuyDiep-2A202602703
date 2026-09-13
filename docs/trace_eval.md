@@ -1,8 +1,8 @@
 # 📊 BÁO CÁO THU HOẠCH NGHIỆM THU BÀI LAB 3 (BƯỚC 3 — SUBMISSION ARTIFACT)
 
-> **Họ và Tên Học viên:** [Điền Họ và Tên]  
-> **Mã Sinh Viên / Mã Học viên:** [Điền MSSV]  
-> **Chủ đề Lựa chọn:** [Điền tên chủ đề đã chọn từ docs/DANH_SACH_DE_TAI.md hoặc Đề tài Mở]  
+> **Họ và Tên Học viên:** Vũ Duy Điệp  
+> **Mã Sinh Viên / Mã Học viên:** 2A202602703  
+> **Chủ đề Lựa chọn:** Trợ lý Học vụ & Tra cứu Lịch thi VinUni:* Tra cứu điểm GPA, lịch thi và đặt lịch tư vấn học vụ với Cố vấn.
 
 ---
 
@@ -10,12 +10,11 @@
 
 | Tiêu chí Đánh giá | Mức độ (1 - 5) | Giải trình chi tiết lý do chọn điểm |
 | :--- | :---: | :--- |
-| **1. Multi-step Reasoning** | / 5 | Bài toán có yêu cầu chia nhỏ nhiều bước suy luận nối tiếp nhau không? |
-| **2. Tool Interaction** | / 5 | Hệ thống có cần kết nối với MCP Server / Cơ sở dữ liệu bên ngoài không? |
-| **3. Dynamic Decision** | / 5 | Bước tiếp theo có phụ thuộc vào kết quả quan sát bước trước không? |
-| **4. Long Horizon Goal** | / 5 | Hệ thống có phải giữ mục tiêu xuyên suốt qua nhiều lượt xử lý không? |
-| **TỔNG ĐIỂM AGENTIC FIT** | **/ 20** | *Nếu tổng điểm > 12/20: Bài toán rất phù hợp triển khai Agentic System.* |
-
+| **1. Multi-step Reasoning** | 4 / 5 | Bài toán yêu cầu chuỗi bước nối tiếp: xác định mã sinh viên → tra lịch thi/GPA → (nếu cần) xác định đúng Cố vấn phụ trách từ hồ sơ học vụ → mới đặt lịch hẹn. Không phải mọi câu hỏi đều đa bước (câu hỏi FAQ chung chỉ 1 bước), nên không chấm tối đa 5/5. |
+| **2. Tool Interaction** | 5 / 5 | Bắt buộc kết nối MCP Server để truy vấn 3 nguồn dữ liệu thời gian thực: hồ sơ học vụ/GPA (`academic_query`), lịch thi (`exam_schedule_query`) và hệ thống đặt lịch hẹn (`schedule_appointment`). Không thể trả lời chính xác chỉ bằng kiến thức tĩnh của LLM. |
+| **3. Dynamic Decision** | 4 / 5 | Tool tiếp theo phụ thuộc trực tiếp vào Observation trước: nếu `academic_query` trả về `NOT_FOUND` thì Agent phải dừng và báo lỗi thay vì tiếp tục đặt lịch; nếu trả về đúng tên Cố vấn, Agent phải dùng đúng giá trị đó (không tự bịa) khi gọi `schedule_appointment`. |
+| **4. Long Horizon Goal** | 3 / 5 | Mục tiêu chỉ xuyên suốt trong 1 phiên hỏi-đáp (vài lượt ReAct trong giới hạn `MAX_ITERATIONS`), chưa cần duy trì trạng thái qua nhiều phiên/nhiều ngày như một Autonomous Agent thực thụ (Cấp 4), nên không chấm tối đa. |
+| **TỔNG ĐIỂM AGENTIC FIT** | **16 / 20** | *Tổng điểm 16 > 12/20 → Bài toán rất phù hợp triển khai Agentic System (ReAct Agent Cấp độ 3) thay vì Chatbot Baseline (Cấp độ 2).* |
 ---
 
 ## 2. TRÍCH XUẤT KẾT QUẢ WATERFALL TRACE LOG (SAU KHI CHẠY TEST SUITE TRÊN API THẬT)
@@ -109,8 +108,8 @@ Dán 1 đoạn trích xuất log tiêu biểu từ file `docs/trace_waterfall.js
 ## 3. TỔNG KẾT KẾT QUẢ NGHIỆM THU & NỘP BÀI
 
 - [ ] Đã điền API Key thật trong `.env` và xác nhận Agent chạy mượt mà trên LLM API thật (Gemini/OpenAI).
-- **Tổng số Test Cases đã chạy thành công:** ___ / 5 test cases.
-- **Số lượt gọi Tool qua MCP Server chính xác:** ___ lượt.
+- **Tổng số Test Cases đã chạy thành công:** 5/ 5 test cases.
+- **Số lượt gọi Tool qua MCP Server chính xác:** 4 lượt.
 - **Kết quả đẩy Repo nộp bài:** [ ] Đã Commit và Push mã nguồn thành công lên GitHub cá nhân.
 
 ---
